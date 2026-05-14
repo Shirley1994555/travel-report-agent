@@ -26,7 +26,7 @@ THIN_BORDER = Border(
 COMMON_FONT = Font(name="Microsoft YaHei", size=10)
 COMMON_ALIGN = Alignment(horizontal="center", vertical="center")
 
-# ===================== 工具函数 =====================
+# ===================== 工具函数（修复了 remove_last_total_row）=====================
 def safe_drop(df: pd.DataFrame, columns) -> pd.DataFrame:
     return df.drop(columns=[c for c in columns if c in df.columns], errors="ignore")
 
@@ -54,10 +54,10 @@ def to_display_date(series: pd.Series) -> pd.Series:
     return output.where(parsed.notna(), series.astype(str))
 
 def remove_last_total_row(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty:
+    if df.empty or len(df) == 0:
         return df
     last_row = df.iloc[-1]
-    if last_row.astype(str).str.contains("合计", na=False):
+    if last_row.astype(str).str.contains("合计", na=False).any():
         return df.iloc[:-1].copy()
     return df
 
