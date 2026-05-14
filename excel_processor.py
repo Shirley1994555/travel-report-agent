@@ -26,7 +26,7 @@ THIN_BORDER = Border(
 COMMON_FONT = Font(name="Microsoft YaHei", size=10)
 COMMON_ALIGN = Alignment(horizontal="center", vertical="center")
 
-# ===================== 工具函数（修复了 remove_last_total_row）=====================
+# ===================== 工具函数 =====================
 def safe_drop(df: pd.DataFrame, columns) -> pd.DataFrame:
     return df.drop(columns=[c for c in columns if c in df.columns], errors="ignore")
 
@@ -131,7 +131,7 @@ def transform_ticket(df_ticket: pd.DataFrame, df_all: pd.DataFrame) -> pd.DataFr
         }
     )
 
-    # 需求：乘机人 移到 起飞时间 左边
+    # 乘机人放到起飞时间左边
     df = move_column_before(df, "乘机人", "起飞时间")
 
     df = move_column(df, "航段", "航班号")
@@ -183,10 +183,11 @@ def transform_ticket(df_ticket: pd.DataFrame, df_all: pd.DataFrame) -> pd.DataFr
     else:
         df["实收实付"] = df["机票服务费"]
 
+    # 删掉不需要的列（含可抵扣税额）
     df = safe_drop(df, [
         "员工自付金额", "预订人", "出差申请单号", "是否超标", "报销单号",
         "违背事项", "客票状态", "是否跨期退改", "收款科目", "乘车人证件号",
-        "可抵扣金额", "不可抵扣金额", "开票服务费", "票款", "对账状态", "航空公司"
+        "可抵扣金额", "不可抵扣金额", "可抵扣税额", "开票服务费", "票款", "对账状态", "航空公司"
     ])
 
     # 法人公司编号右侧加商旅供应商
