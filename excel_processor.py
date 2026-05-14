@@ -11,6 +11,7 @@ import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
+from io import BytesIO
 
 # ===================== 样式常量（完全保留你的原始代码）=====================
 HEADER_FILL = PatternFill(fill_type="solid", start_color="D0CECE", end_color="D0CECE")
@@ -244,39 +245,40 @@ def transform_hotel(df_hotel: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]
     df_personal = reset_serial_column(df_personal.reset_index(drop=True))
     return df_main, df_personal
 
-# ===================== ✅ 核心：Agent 调用函数（无GUI、全自动）=====================
-def process_uploaded_file(input_file_path: str | Path) -> tuple[Path, Path]:
-    """
-    给 Agent 使用的通用入口
-    :param input_file_path: 上传的 Excel 文件路径
-    :return: (机票输出路径, 酒店输出路径)
-    """
-    input_path = Path(input_file_path)
-    output_dir = input_path.parent  # 输出到上传文件同一目录
+# ===================== ✅ 核心：修复云端读取 Excel BUG =====================
+def process_uploaded_file(uploaded_file):
+    # 读取二进制（修复跨平台报错）
+    file_bytes = uploaded_file.read()
+    xls = BytesIO(file_bytes)
 
-    # 读取文件
-    xls = pd.ExcelFile(input_path)
-    df_all = pd.read_excel(xls, sheet_name="全部")
-    df_hotel = pd.read_excel(xls, sheet_name="酒店")
-    df_ticket = pd.read_excel(xls, sheet_name="国内机票")
+    # 读取工作表 + 每次读完重置指针（核心修复）
+    df_all = pd.read_excel(xls, sheet_name="全部", engine="openpyxl")
+    xls.seek(0)
+    
+    df_hotel = pd.read_excel(xls, sheet_name="酒店", engine="openpyxl")
+    xls.seek(0)
+    
+    df_ticket = pd.read_excel(xls, sheet_name="国内机票", engine="openpyxl")
 
-    # 处理
+    # 你的原有业务逻辑
     df_hotel = remove_last_total_row(df_hotel)
     df_ticket = remove_last_total_row(df_ticket)
     out_ticket = transform_ticket(df_ticket, df_all)
     out_hotel, out_hotel_personal = transform_hotel(df_hotel)
 
-    # 输出文件
-    ticket_output = output_dir / "国内机票_转换后.xlsx"
-    hotel_output = output_dir / "酒店_转换后.xlsx"
+    # 输出到 tmp 目录（Streamlit 云专用）
+    tmp_dir = Path("/tmp")
+    
+    ticket_path = tmp_dir / "国内机票_转换后.xlsx"
+    hotel_path = tmp_dir / "酒店_转换后.xlsx"
 
-    with pd.ExcelWriter(ticket_output, engine="openpyxl") as writer:
+    with pd.ExcelWriter(ticket_path, engine="openpyxl") as writer:
         out_ticket.to_excel(writer, sheet_name="国内机票", index=False)
-    style_excel(ticket_output)
+    style_excel(ticket_path)
 
-    with pd.ExcelWriter(hotel_output, engine="openpyxl") as writer:
+    with pd.ExcelWriter(hotel_path, engine="openpyxl") as writer:
         out_hotel.to_excel(writer, sheet_name="酒店", index=False)
         out_hotel_personal.to_excel(writer, sheet_name="酒店-个人支付", index=False)
-    style_excel(hotel_output)
+    style_excel(hotel_path)
 
-    return ticket_output, hotel_output
+    return ticket_path, hotel_path
