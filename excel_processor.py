@@ -39,6 +39,15 @@ def move_column(df: pd.DataFrame, col: str, after_col: str) -> pd.DataFrame:
     cols.insert(idx, col)
     return df[cols]
 
+def move_column_before(df: pd.DataFrame, col: str, before_col: str) -> pd.DataFrame:
+    if col not in df.columns or before_col not in df.columns:
+        return df
+    cols = list(df.columns)
+    cols.remove(col)
+    idx = cols.index(before_col)
+    cols.insert(idx, col)
+    return df[cols]
+
 def to_display_date(series: pd.Series) -> pd.Series:
     parsed = pd.to_datetime(series, errors="coerce")
     output = parsed.dt.strftime("%Y/%m/%d")
@@ -48,7 +57,7 @@ def remove_last_total_row(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     last_row = df.iloc[-1]
-    if last_row.astype(str).str.contains("合计", na=False).any():
+    if last_row.astype(str).str.contains("合计", na=False):
         return df.iloc[:-1].copy()
     return df
 
@@ -99,17 +108,15 @@ def style_excel(path: Path) -> None:
             ws.column_dimensions[letter].width = min(max(10, max_len + 2), 60)
     wb.save(path)
 
-# ===================== 机票处理（已严格实现你3个需求） =====================
+# ===================== 机票处理 =====================
 def transform_ticket(df_ticket: pd.DataFrame, df_all: pd.DataFrame) -> pd.DataFrame:
     df = df_ticket.copy()
     
     if "原票号" in df.columns:
         df = df.sort_values(by="原票号", kind="stable")
 
-    # 基础删除
     df = safe_drop(df, ["成本中心", "供应单号", "原订单编号", "原票号", "预订日期", "乘机人部门", "其他(CNY)"])
     
-    # 重命名
     df = df.rename(
         columns={
             "订单编号": "订单号",
@@ -124,14 +131,12 @@ def transform_ticket(df_ticket: pd.DataFrame, df_all: pd.DataFrame) -> pd.DataFr
         }
     )
 
-    # ===================== 需求3：乘机人 移动到 起飞时间 右边 =====================
-    df = move_column(df, "乘机人", "起飞时间")
+    # 需求：乘机人 移到 起飞时间 左边
+    df = move_column_before(df, "乘机人", "起飞时间")
 
-    # 列顺序调整
     df = move_column(df, "航段", "航班号")
     df = move_column(df, "退票费", "改签费")
 
-    # 服务费计算逻辑
     df["机票服务费"] = 0.0
     key_col = "票号" if "票号" in df.columns else ("承运人-票号" if "承运人-票号" in df.columns else None)
     if key_col and {"订单类型名称", "结算金额"}.issubset(df.columns):
@@ -156,7 +161,6 @@ def transform_ticket(df_ticket: pd.DataFrame, df_all: pd.DataFrame) -> pd.DataFr
         if drop_idx:
             df = df.drop(index=drop_idx)
 
-        # 改签单/退票单清理
         change_mask = df["订单类型名称"].astype(str) == "国内机票改签单"
         for _, idxes in df[change_mask].groupby(key_col, dropna=False).groups.items():
             idx_list = list(idxes)
@@ -173,28 +177,25 @@ def transform_ticket(df_ticket: pd.DataFrame, df_all: pd.DataFrame) -> pd.DataFr
                 if zeros:
                     df = df.drop(index=zeros[0])
 
-    # 计算实收实付
     df["机票服务费"] = pd.to_numeric(df["机票服务费"], errors="coerce").fillna(0)
     if "结算金额" in df.columns:
         df["实收实付"] = pd.to_numeric(df["结算金额"], errors="coerce").fillna(0) + df["机票服务费"]
     else:
         df["实收实付"] = df["机票服务费"]
 
-    # 清理无用列
     df = safe_drop(df, [
         "员工自付金额", "预订人", "出差申请单号", "是否超标", "报销单号",
         "违背事项", "客票状态", "是否跨期退改", "收款科目", "乘车人证件号",
-        "可抵扣税额", "不可抵扣金额", "开票服务费", "票款", "对账状态", "航空公司"
+        "可抵扣金额", "不可抵扣金额", "开票服务费", "票款", "对账状态", "航空公司"
     ])
 
-    # ===================== 需求2：法人公司编号 右边 → 商旅供应商（景鸿商旅） =====================
+    # 法人公司编号右侧加商旅供应商
     if "法人公司编号" in df.columns:
         df.insert(df.columns.get_loc("法人公司编号") + 1, "商旅供应商", "景鸿商旅")
 
-    # ===================== 需求1：删除 结算金额 列 =====================
+    # 删除结算金额列
     df = safe_drop(df, ["结算金额"])
 
-    # 重置序号
     return reset_serial_column(df.reset_index(drop=True))
 
 # ===================== 酒店处理 =====================
