@@ -13,7 +13,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from io import BytesIO
 
-# ===================== 样式常量（完全保留你的原始代码）=====================
+# ===================== 样式常量 =====================
 HEADER_FILL = PatternFill(fill_type="solid", start_color="D0CECE", end_color="D0CECE")
 ROW_FILL_RETREAT = PatternFill(fill_type="solid", start_color="93D23E", end_color="93D23E")
 ROW_FILL_CHANGE = PatternFill(fill_type="solid", start_color="FCC200", end_color="FCC200")
@@ -26,7 +26,7 @@ THIN_BORDER = Border(
 COMMON_FONT = Font(name="Microsoft YaHei", size=10)
 COMMON_ALIGN = Alignment(horizontal="center", vertical="center")
 
-# ===================== 工具函数（完全不变）=====================
+# ===================== 工具函数 =====================
 def safe_drop(df: pd.DataFrame, columns) -> pd.DataFrame:
     return df.drop(columns=[c for c in columns if c in df.columns], errors="ignore")
 
@@ -99,7 +99,7 @@ def style_excel(path: Path) -> None:
             ws.column_dimensions[letter].width = min(max(10, max_len + 2), 60)
     wb.save(path)
 
-# ===================== 业务转换逻辑（100% 原样保留）=====================
+# ===================== 业务转换逻辑 =====================
 def transform_ticket(df_ticket: pd.DataFrame, df_all: pd.DataFrame) -> pd.DataFrame:
     df = df_ticket.copy()
     if "原票号" in df.columns:
@@ -245,22 +245,22 @@ def transform_hotel(df_hotel: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]
     df_personal = reset_serial_column(df_personal.reset_index(drop=True))
     return df_main, df_personal
 
-# ===================== ✅ 核心：修复云端读取 Excel BUG =====================
+# ===================== ✅ 云端 100% 稳定版核心函数 =====================
 def process_uploaded_file(uploaded_file):
-    # 读取二进制（修复跨平台报错）
+    # 读取文件二进制（跨平台稳定）
     file_bytes = uploaded_file.read()
-    xls = BytesIO(file_bytes)
 
-    # 读取工作表 + 每次读完重置指针（核心修复）
-    df_all = pd.read_excel(xls, sheet_name="全部", engine="openpyxl")
-    xls.seek(0)
-    
-    df_hotel = pd.read_excel(xls, sheet_name="酒店", engine="openpyxl")
-    xls.seek(0)
-    
-    df_ticket = pd.read_excel(xls, sheet_name="国内机票", engine="openpyxl")
+    # 每个表独立创建 BytesIO，彻底解决 seek/指针报错
+    xls_all = BytesIO(file_bytes)
+    df_all = pd.read_excel(xls_all, sheet_name="全部", engine="openpyxl")
 
-    # 你的原有业务逻辑
+    xls_hotel = BytesIO(file_bytes)
+    df_hotel = pd.read_excel(xls_hotel, sheet_name="酒店", engine="openpyxl")
+
+    xls_ticket = BytesIO(file_bytes)
+    df_ticket = pd.read_excel(xls_ticket, sheet_name="国内机票", engine="openpyxl")
+
+    # 原有业务逻辑
     df_hotel = remove_last_total_row(df_hotel)
     df_ticket = remove_last_total_row(df_ticket)
     out_ticket = transform_ticket(df_ticket, df_all)
@@ -268,7 +268,6 @@ def process_uploaded_file(uploaded_file):
 
     # 输出到 tmp 目录（Streamlit 云专用）
     tmp_dir = Path("/tmp")
-    
     ticket_path = tmp_dir / "国内机票_转换后.xlsx"
     hotel_path = tmp_dir / "酒店_转换后.xlsx"
 
