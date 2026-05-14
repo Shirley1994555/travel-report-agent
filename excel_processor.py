@@ -13,7 +13,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from io import BytesIO
 
-# ===================== 样式常量（完全保留你的原始代码）=====================
+# ===================== 样式常量 =====================
 HEADER_FILL = PatternFill(fill_type="solid", start_color="D0CECE", end_color="D0CECE")
 ROW_FILL_RETREAT = PatternFill(fill_type="solid", start_color="93D23E", end_color="93D23E")
 ROW_FILL_CHANGE = PatternFill(fill_type="solid", start_color="FCC200", end_color="FCC200")
@@ -26,7 +26,7 @@ THIN_BORDER = Border(
 COMMON_FONT = Font(name="Microsoft YaHei", size=10)
 COMMON_ALIGN = Alignment(horizontal="center", vertical="center")
 
-# ===================== 工具函数（完全不变）=====================
+# ===================== 工具函数 =====================
 def safe_drop(df: pd.DataFrame, columns) -> pd.DataFrame:
     return df.drop(columns=[c for c in columns if c in df.columns], errors="ignore")
 
@@ -99,13 +99,17 @@ def style_excel(path: Path) -> None:
             ws.column_dimensions[letter].width = min(max(10, max_len + 2), 60)
     wb.save(path)
 
-# ===================== 业务转换逻辑（已全部修复完毕）=====================
+# ===================== 机票处理（已严格实现你3个需求） =====================
 def transform_ticket(df_ticket: pd.DataFrame, df_all: pd.DataFrame) -> pd.DataFrame:
     df = df_ticket.copy()
+    
     if "原票号" in df.columns:
         df = df.sort_values(by="原票号", kind="stable")
 
+    # 基础删除
     df = safe_drop(df, ["成本中心", "供应单号", "原订单编号", "原票号", "预订日期", "乘机人部门", "其他(CNY)"])
+    
+    # 重命名
     df = df.rename(
         columns={
             "订单编号": "订单号",
@@ -120,19 +124,21 @@ def transform_ticket(df_ticket: pd.DataFrame, df_all: pd.DataFrame) -> pd.DataFr
         }
     )
 
-    # 乘机人 移动到 起飞时间 右边
+    # ===================== 需求3：乘机人 移动到 起飞时间 右边 =====================
     df = move_column(df, "乘机人", "起飞时间")
 
+    # 列顺序调整
     df = move_column(df, "航段", "航班号")
     df = move_column(df, "退票费", "改签费")
 
+    # 服务费计算逻辑
     df["机票服务费"] = 0.0
     key_col = "票号" if "票号" in df.columns else ("承运人-票号" if "承运人-票号" in df.columns else None)
     if key_col and {"订单类型名称", "结算金额"}.issubset(df.columns):
         normal_mask = df["订单类型名称"].astype(str) == "国内机票正常单"
         settle_num = pd.to_numeric(df["结算金额"], errors="coerce")
-        drop_idx: list[int] = []
-        fee_idx: list[int] = []
+        drop_idx = []
+        fee_idx = []
 
         normal_groups = df[normal_mask].groupby(key_col, dropna=False).groups
         for _, idxes in normal_groups.items():
@@ -150,59 +156,48 @@ def transform_ticket(df_ticket: pd.DataFrame, df_all: pd.DataFrame) -> pd.DataFr
         if drop_idx:
             df = df.drop(index=drop_idx)
 
+        # 改签单/退票单清理
         change_mask = df["订单类型名称"].astype(str) == "国内机票改签单"
-        change_groups = df[change_mask].groupby(key_col, dropna=False).groups
-        drop_change_zero: list[int] = []
-        settle_num_after = pd.to_numeric(df["结算金额"], errors="coerce")
-        for _, idxes in change_groups.items():
+        for _, idxes in df[change_mask].groupby(key_col, dropna=False).groups.items():
             idx_list = list(idxes)
-            if len(idx_list) < 2:
-                continue
-            zeros = [i for i in idx_list if settle_num_after[i] == 0]
-            if zeros:
-                drop_change_zero.append(zeros[0])
-        if drop_change_zero:
-            df = df.drop(index=drop_change_zero)
+            if len(idx_list) >= 2:
+                zeros = [i for i in idx_list if settle_num.loc[i] == 0]
+                if zeros:
+                    df = df.drop(index=zeros[0])
 
         refund_mask = df["订单类型名称"].astype(str) == "国内机票退票单"
-        refund_groups = df[refund_mask].groupby(key_col, dropna=False).groups
-        drop_refund_zero: list[int] = []
-        for _, idxes in refund_groups.items():
+        for _, idxes in df[refund_mask].groupby(key_col, dropna=False).groups.items():
             idx_list = list(idxes)
-            if len(idx_list) < 2:
-                continue
-            zeros = [i for i in idx_list if settle_num_after[i] == 0]
-            if zeros:
-                drop_refund_zero.append(zeros[0])
-        if drop_refund_zero:
-            df = df.drop(index=drop_refund_zero)
+            if len(idx_list) >= 2:
+                zeros = [i for i in idx_list if settle_num.loc[i] == 0]
+                if zeros:
+                    df = df.drop(index=zeros[0])
 
+    # 计算实收实付
     df["机票服务费"] = pd.to_numeric(df["机票服务费"], errors="coerce").fillna(0)
     if "结算金额" in df.columns:
-        df["结算金额"] = pd.to_numeric(df["结算金额"], errors="coerce").fillna(0)
-        df["实收实付"] = df["结算金额"] + df["机票服务费"]
+        df["实收实付"] = pd.to_numeric(df["结算金额"], errors="coerce").fillna(0) + df["机票服务费"]
     else:
         df["实收实付"] = df["机票服务费"]
 
-    df = safe_drop(
-        df,
-        [
-            "员工自付金额", "预订人", "出差申请单号", "是否超标", "报销单号",
-            "违背事项", "客票状态", "是否跨期退改", "收款科目", "乘车人证件号",
-            "可抵扣税额", "不可抵扣金额", "开票服务费", "票款", "对账状态", "航空公司",
-        ],
-    )
+    # 清理无用列
+    df = safe_drop(df, [
+        "员工自付金额", "预订人", "出差申请单号", "是否超标", "报销单号",
+        "违背事项", "客票状态", "是否跨期退改", "收款科目", "乘车人证件号",
+        "可抵扣税额", "不可抵扣金额", "开票服务费", "票款", "对账状态", "航空公司"
+    ])
 
-    # 法人公司编号右侧新增 商旅供应商 固定景鸿商旅
+    # ===================== 需求2：法人公司编号 右边 → 商旅供应商（景鸿商旅） =====================
     if "法人公司编号" in df.columns:
-        idx = list(df.columns).index("法人公司编号")
-        df.insert(idx + 1, "商旅供应商", "景鸿商旅")
+        df.insert(df.columns.get_loc("法人公司编号") + 1, "商旅供应商", "景鸿商旅")
 
-    # 删除多余结算金额列
+    # ===================== 需求1：删除 结算金额 列 =====================
     df = safe_drop(df, ["结算金额"])
 
+    # 重置序号
     return reset_serial_column(df.reset_index(drop=True))
 
+# ===================== 酒店处理 =====================
 def transform_hotel(df_hotel: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     df = df_hotel.copy()
     if "原订单编号" in df.columns:
@@ -232,14 +227,11 @@ def transform_hotel(df_hotel: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]
             cols.insert(settle_idx, "服务费")
             df = df[cols]
 
-    df = safe_drop(
-        df,
-        [
-            "销售价", "酒店协议类型", "出差申请单号", "报销单号", "预订人",
-            "业务发生时间", "酒店付款类型", "是否超标", "违背事项", "收款科目",
-            "开票服务费", "供应发票类型", "票款",
-        ],
-    )
+    df = safe_drop(df, [
+        "销售价", "酒店协议类型", "出差申请单号", "报销单号", "预订人",
+        "业务发生时间", "酒店付款类型", "是否超标", "违背事项", "收款科目",
+        "开票服务费", "供应发票类型", "票款",
+    ])
 
     if {"结算金额", "员工自付金额"}.issubset(df.columns):
         emp_paid = pd.to_numeric(df["员工自付金额"], errors="coerce").fillna(0)
@@ -256,7 +248,7 @@ def transform_hotel(df_hotel: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]
     df_personal = reset_serial_column(df_personal.reset_index(drop=True))
     return df_main, df_personal
 
-# ===================== 跨平台稳定读取（Windows/Mac 通用）=====================
+# ===================== 跨平台稳定读取 =====================
 def process_uploaded_file(uploaded_file):
     file_bytes = uploaded_file.read()
     xls = BytesIO(file_bytes)
