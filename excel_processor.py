@@ -99,7 +99,7 @@ def style_excel(path: Path) -> None:
             ws.column_dimensions[letter].width = min(max(10, max_len + 2), 60)
     wb.save(path)
 
-# ===================== 业务转换逻辑（100% 原样保留）=====================
+# ===================== 业务转换逻辑（已全部修复完毕）=====================
 def transform_ticket(df_ticket: pd.DataFrame, df_all: pd.DataFrame) -> pd.DataFrame:
     df = df_ticket.copy()
     if "原票号" in df.columns:
@@ -120,7 +120,9 @@ def transform_ticket(df_ticket: pd.DataFrame, df_all: pd.DataFrame) -> pd.DataFr
         }
     )
 
-    df = move_column(df, "起飞时间", "乘机")
+    # 乘机人 移动到 起飞时间 右边
+    df = move_column(df, "乘机人", "起飞时间")
+
     df = move_column(df, "航段", "航班号")
     df = move_column(df, "退票费", "改签费")
 
@@ -190,6 +192,15 @@ def transform_ticket(df_ticket: pd.DataFrame, df_all: pd.DataFrame) -> pd.DataFr
             "可抵扣税额", "不可抵扣金额", "开票服务费", "票款", "对账状态", "航空公司",
         ],
     )
+
+    # 法人公司编号右侧新增 商旅供应商 固定景鸿商旅
+    if "法人公司编号" in df.columns:
+        idx = list(df.columns).index("法人公司编号")
+        df.insert(idx + 1, "商旅供应商", "景鸿商旅")
+
+    # 删除多余结算金额列
+    df = safe_drop(df, ["结算金额"])
+
     return reset_serial_column(df.reset_index(drop=True))
 
 def transform_hotel(df_hotel: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -245,14 +256,13 @@ def transform_hotel(df_hotel: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]
     df_personal = reset_serial_column(df_personal.reset_index(drop=True))
     return df_main, df_personal
 
-# ===================== 修复：自动匹配工作表，兼容Windows/Mac中文表名 =====================
+# ===================== 跨平台稳定读取（Windows/Mac 通用）=====================
 def process_uploaded_file(uploaded_file):
     file_bytes = uploaded_file.read()
     xls = BytesIO(file_bytes)
     excel_file = pd.ExcelFile(xls)
     all_sheets = [s.strip() for s in excel_file.sheet_names]
 
-    # 模糊匹配，包含关键字就匹配，规避Windows/Mac中文编码、空格问题
     def find_sheet(keyword):
         for s in all_sheets:
             if keyword in s:
